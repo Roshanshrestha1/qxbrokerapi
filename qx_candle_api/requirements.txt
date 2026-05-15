@@ -1,13 +1,26 @@
-# API-Quotex - Better library with Playwright login (handles Cloudflare)
+# QxBroker Candle Data API - Production Dependencies
+
+# Core API Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# QxBroker Client Library (with Playwright for Cloudflare bypass)
 git+https://github.com/A11ksa/API-Quotex.git
-fastapi
-uvicorn
-python-dotenv
-pandas
-numpy
+
+# Environment Configuration
+python-dotenv==1.0.0
+
+# Data Processing
+pandas==2.1.4
+numpy==1.26.3
+
+# WebSocket Support
 websockets==12.0
-cloudscraper
-beautifulsoup4
+
+# HTTP/Web Utilities
+aiohttp==3.9.1
+cloudscraper==1.2.71
+beautifulsoup4==4.12.2
+
+# Dependency Compatibility
 setuptools<70
-python-telegram-bot>=20.0
-aiohttp

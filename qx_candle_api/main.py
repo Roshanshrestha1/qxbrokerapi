@@ -1,24 +1,32 @@
 """
-QxBroker Private Candle API Server
-===================================
-A private local API that fetches real candle data from QxBroker via WebSocket.
+QxBroker Candle Data API Server
+================================
+Clean, production-ready API for fetching real-time and historical candle data
+from QxBroker via WebSocket connection.
 
-Run: uvicorn main:app --host 127.0.0.1 --port 8000
+Usage:
+    uvicorn main:app --host 0.0.0.0 --port 8000
+
+Environment Variables:
+    QX_EMAIL     - QxBroker account email
+    QX_PASSWORD  - QxBroker account password
+    QX_ACCOUNT   - PRACTICE or REAL (default: PRACTICE)
 
 Endpoints:
-    GET /                       - API status
-    GET /docs                   - Interactive API docs (Swagger UI)
+    GET /                       - API health check
+    GET /docs                   - Swagger UI documentation
     GET /balance                - Account balance
-    GET /assets                 - List all available assets
-    GET /payouts                - Payout percentages for all assets
-    GET /candles/{asset}        - Historical candles (hours of data)
+    GET /assets                 - Available trading assets
+    GET /payouts                - Asset payout percentages
+    GET /candles/{asset}        - Historical OHLCV candles
     GET /candles/{asset}/latest - Latest N candles
-    GET /candles/{asset}/live   - Current live candle
+    GET /candles/{asset}/max    - Maximum 200 candles
+    GET /candles/{asset}/live   - Current forming candle
     GET /price/{asset}          - Latest tick price
-    GET /sentiment/{asset}      - Market sentiment (% buy/sell)
+    GET /sentiment/{asset}      - Market sentiment (buy/sell %)
 """
 
-import asyncio
+import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -35,89 +43,116 @@ from qx_client import (
     fetch_payouts,
 )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 
 # -------------------------------------------------------
-# Startup: connect to QxBroker when API server starts
+# Application Lifecycle Management
 # -------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Connecting to QxBroker...")
+    """Initialize WebSocket connection on startup."""
+    logger.info("Starting QxBroker Candle API...")
     await connect_client()
-    print("API ready.")
+    logger.info("API server ready to accept requests")
     yield
-    print("Shutting down.")
+    logger.info("Shutting down API server...")
 
 
 app = FastAPI(
-    title="QxBroker Private Candle API",
-    description="Private local API — fetches real candle data from QxBroker via WebSocket",
+    title="QxBroker Candle Data API",
+    description="Production API for real-time and historical candle data from QxBroker",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# Allow only localhost — this keeps it private
+# CORS configuration - restrict to localhost for security
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost", "http://127.0.0.1"],
     allow_methods=["GET"],
     allow_headers=["*"],
+    allow_credentials=False,
 )
 
 
 # -------------------------------------------------------
-# ENDPOINTS
+# API ENDPOINTS
 # -------------------------------------------------------
 
 
-@app.get("/")
+@app.get("/", tags=["Health"])
 async def root():
-    """API status endpoint."""
+    """API health check and information endpoint."""
     return {
         "status": "running",
-        "note": "Private QxBroker candle API",
-        "docs": "http://localhost:8000/docs",
+        "service": "QxBroker Candle Data API",
+        "version": "1.0.0",
+        "documentation": "/docs",
     }
 
 
-@app.get("/balance")
+@app.get("/balance", tags=["Account"])
 async def get_balance():
-    """Get current account balance."""
+    """
+    Retrieve current account balance.
+    
+    Returns balance information for the authenticated account.
+    """
     try:
         return await fetch_balance()
     except Exception as e:
+        logger.error(f"Balance fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/assets")
+@app.get("/assets", tags=["Assets"])
 async def get_assets():
-    """Get list of all available trading assets."""
+    """
+    Get all available trading assets categorized by type.
+    
+    Returns assets separated into normal and OTC (Over-The-Counter) categories.
+    """
     try:
         assets = await fetch_all_assets()
 
-        # Separate normal and OTC
-        normal = [a for a in assets.keys() if not a.endswith("_otc")]
-        otc = [a for a in assets.keys() if a.endswith("_otc")]
+        # Categorize assets
+        normal = sorted([a for a in assets.keys() if not a.endswith("_otc")])
+        otc = sorted([a for a in assets.keys() if a.endswith("_otc")])
 
         return {
             "total": len(assets),
-            "normal": sorted(normal),
-            "otc": sorted(otc),
+            "normal_count": len(normal),
+            "otc_count": len(otc),
+            "normal": normal,
+            "otc": otc,
             "all": sorted(assets.keys()),
         }
     except Exception as e:
+        logger.error(f"Assets fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/payouts")
+@app.get("/payouts", tags=["Assets"])
 async def get_payouts():
-    """Get payout % for all assets. Shows which are open/closed."""
+    """
+    Get payout percentages for all available assets.
+    
+    Indicates which assets are currently open for trading and their payout rates.
+    """
     try:
         return await fetch_payouts()
     except Exception as e:
+        logger.error(f"Payouts fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/candles/{asset}")
+@app.get("/candles/{asset}", tags=["Candles"])
 async def get_candles(
     asset: str,
     period: int = Query(
@@ -125,44 +160,29 @@ async def get_candles(
         description="Candle period in seconds: 5,15,30,60,300,900,3600,86400",
     ),
     hours: int = Query(
-        default=1, description="How many hours of history to fetch (1-24)"
+        default=1, 
+        description="Hours of historical data to fetch (1-24)",
+        ge=1, 
+        le=24
     ),
 ):
     """
     Fetch historical OHLCV candles from QxBroker.
-
-    Example: /candles/EURUSD?period=60&hours=2
-
-    Asset examples:
-      EURUSD, GBPUSD, USDJPY, XAUUSD, BTCUSD
-      Add _otc suffix for OTC version: EURUSD_otc
-
-    Period examples (seconds):
-      5=5s  60=1min  300=5min  900=15min  3600=1hr  86400=1day
+    
+    **Asset Examples:**
+    - EURUSD, GBPUSD, USDJPY, XAUUSD, BTCUSD
+    - Add _otc suffix for OTC: EURUSD_otc
+    
+    **Period Examples (seconds):**
+    - 5, 60 (1min), 300 (5min), 900 (15min), 3600 (1hr), 86400 (1day)
+    
+    **Example Request:** `/candles/EURUSD?period=60&hours=2`
     """
-    if hours < 1 or hours > 24:
-        raise HTTPException(status_code=400, detail="hours must be between 1 and 24")
-
-    valid_periods = [
-        5,
-        10,
-        15,
-        30,
-        60,
-        120,
-        180,
-        240,
-        300,
-        600,
-        900,
-        1800,
-        3600,
-        14400,
-        86400,
-    ]
+    valid_periods = [5, 10, 15, 30, 60, 120, 180, 240, 300, 600, 900, 1800, 3600, 14400, 86400]
     if period not in valid_periods:
         raise HTTPException(
-            status_code=400, detail=f"period must be one of: {valid_periods}"
+            status_code=400, 
+            detail=f"Invalid period. Must be one of: {valid_periods}"
         )
 
     try:
@@ -177,23 +197,21 @@ async def get_candles(
             "candles": candles,
         }
     except Exception as e:
+        logger.error(f"Candles fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/candles/{asset}/latest")
+@app.get("/candles/{asset}/latest", tags=["Candles"])
 async def get_latest_candles(
     asset: str,
-    period: int = Query(default=60),
-    count: int = Query(default=100, description="Number of candles (max 200)"),
+    period: int = Query(default=60, description="Candle period in seconds"),
+    count: int = Query(default=100, description="Number of candles (1-200)", ge=1, le=200),
 ):
     """
-    Fetch latest N candles (max 200).
-
-    Example: /candles/EURUSD/latest?period=60&count=50
+    Fetch latest N candles (maximum 200).
+    
+    **Example:** `/candles/EURUSD/latest?period=60&count=50`
     """
-    if count > 200:
-        raise HTTPException(status_code=400, detail="count cannot exceed 200")
-
     try:
         candles = await fetch_latest_candles(
             asset=asset.upper(), count=count, period=period
@@ -205,19 +223,21 @@ async def get_latest_candles(
             "candles": candles,
         }
     except Exception as e:
+        logger.error(f"Latest candles fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/candles/{asset}/max")
+@app.get("/candles/{asset}/max", tags=["Candles"])
 async def get_max_candles(
     asset: str,
     period: int = Query(default=60, description="Candle period in seconds"),
 ):
     """
-    Fetch maximum 200 candles at once (broker limit).
-
-    Example: /candles/EURUSD/max?period=60
-    Returns 200 candles (or up to broker limit ~199)
+    Fetch maximum allowed candles (200) at once.
+    
+    This endpoint returns up to 200 candles, which is the broker's limit.
+    
+    **Example:** `/candles/EURUSD/max?period=60`
     """
     try:
         candles = await fetch_latest_candles(
@@ -230,58 +250,65 @@ async def get_max_candles(
             "candles": candles,
         }
     except Exception as e:
+        logger.error(f"Max candles fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/candles/{asset}/live")
+@app.get("/candles/{asset}/live", tags=["Candles"])
 async def get_live_candle(
     asset: str,
-    period: int = Query(default=60),
+    period: int = Query(default=60, description="Candle period in seconds"),
 ):
     """
-    Get the current live candle being formed right now.
-
-    Example: /candles/EURUSD/live?period=60
+    Get the current live candle being formed in real-time.
+    
+    **Example:** `/candles/EURUSD/live?period=60`
     """
     try:
         candle = await fetch_realtime_candle(asset=asset.upper(), period=period)
         return {"asset": asset.upper(), "period": period, "candle": candle}
     except Exception as e:
+        logger.error(f"Live candle fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/price/{asset}")
+@app.get("/price/{asset}", tags=["Price"])
 async def get_price(
     asset: str,
-    period: int = Query(default=60),
+    period: int = Query(default=60, description="Candle period in seconds"),
 ):
     """
     Get the latest tick price for an asset.
-
-    Example: /price/EURUSD
+    
+    **Example:** `/price/EURUSD`
     """
     try:
         price = await fetch_realtime_price(asset=asset.upper(), period=period)
         return {"asset": asset.upper(), "data": price}
     except Exception as e:
+        logger.error(f"Price fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/sentiment/{asset}")
+@app.get("/sentiment/{asset}", tags=["Sentiment"])
 async def get_sentiment(asset: str):
     """
-    Get real market sentiment — % of real traders buying vs selling.
-
-    Example: /sentiment/EURUSD
-    Response: {"buy": 62, "sell": 38}
+    Get real-time market sentiment (% of traders buying vs selling).
+    
+    Returns the percentage of traders currently buying vs selling the asset.
+    
+    **Example:** `/sentiment/EURUSD`
+    **Response:** `{"buy": 62, "sell": 38}`
     """
     try:
         sentiment = await fetch_sentiment(asset.upper())
         return {"asset": asset.upper(), "sentiment": sentiment}
     except Exception as e:
+        logger.error(f"Sentiment fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------------------------------------------------------
-# Run: uvicorn main:app --host 127.0.0.1 --port 8000
-# -------------------------------------------------------
+# Application entry point
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
