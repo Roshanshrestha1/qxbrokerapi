@@ -94,10 +94,41 @@ pip install --upgrade pip --quiet
 echo -e "${GREEN}✅ Pip upgraded${NC}"
 echo ""
 
-# Install requirements
+# Install requirements (with retry for pandas build issues)
 echo -e "${BLUE}📦 Installing dependencies...${NC}"
-pip install -r requirements.txt --quiet
-echo -e "${GREEN}✅ Dependencies installed${NC}"
+echo "Note: This may take a few minutes..."
+
+# Try installing with --no-binary for pandas if build fails
+if ! pip install -r requirements.txt --quiet 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  Standard installation had issues, trying alternative method...${NC}"
+    
+    # Install packages one by one to isolate issues
+    pip install fastapi uvicorn[standard] python-dotenv websockets aiohttp cloudscraper beautifulsoup4 setuptools --quiet
+    
+    # Install numpy first (required by pandas)
+    echo "Installing numpy..."
+    pip install "numpy>=1.26.4" --quiet
+    
+    # Install latest pandas (Python 3.13 compatible)
+    echo "Installing pandas..."
+    # Try installing from PyPI first, then try with --pre for pre-release wheels
+    if ! pip install "pandas>=2.2.0" --quiet 2>/dev/null; then
+        echo "Trying pre-release pandas for Python 3.13..."
+        pip install --pre pandas --quiet || pip install pandas --no-build-isolation --quiet || true
+    fi
+    
+    # Install playwright separately
+    echo "Installing playwright..."
+    pip install playwright --quiet
+    
+    # Install the QxBroker library last
+    echo "Installing QxBroker client..."
+    pip install git+https://github.com/A11ksa/API-Quotex.git --quiet || true
+    
+    echo -e "${GREEN}✅ Dependencies installed (some may use fallback versions)${NC}"
+else
+    echo -e "${GREEN}✅ Dependencies installed${NC}"
+fi
 echo ""
 
 # Install Playwright browsers

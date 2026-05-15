@@ -26,12 +26,25 @@ cd /workspace
 The script will:
 - Create `.env` file from template if missing
 - Set up virtual environment
-- Install all dependencies
+- Install all dependencies (with Python 3.13 compatibility)
 - Install Playwright browsers
 - Perform initial login to save session
 - Start the API server
 
-### Option 2: Manual Setup
+### Option 2: Alternative Installer (If run.sh fails)
+
+```bash
+./install_alternative.sh
+```
+
+This script handles Python 3.13 compatibility issues with alternative installation methods.
+
+### Option 3: Manual Setup
+
+See [INSTALL.md](INSTALL.md) for detailed installation instructions including:
+- Conda/Mamba installation (best for Python 3.13)
+- Downgrading to Python 3.11/3.12
+- Binary-only installation method
 
 #### 1. Configure Environment
 
@@ -45,11 +58,14 @@ QX_ACCOUNT=PRACTICE  # or REAL
 
 #### 2. Install Dependencies
 
+**For Python 3.11/3.12:**
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 playwright install-deps chromium  # Linux only
 ```
+
+**For Python 3.13:** See [INSTALL.md](INSTALL.md) for compatible installation methods.
 
 #### 3. Run the API
 
