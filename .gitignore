@@ -1,1 +1,1 @@
-(empty)
+Nothing should be ignored based on the provided file changes. The added and modified files (INSTALL.md, install_alternative.sh, README.md, requirements.txt, run.sh) are all source/config files that should be tracked in version control.
