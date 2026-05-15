@@ -5,6 +5,8 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
+    curl \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy project files
@@ -17,14 +19,18 @@ RUN python -m venv /app/venv
 ENV VIRTUAL_ENV=/app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
+# Upgrade pip and install dependencies
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Install Playwright
+# Install Playwright and browsers
 RUN playwright install chromium
 
 # Expose port
 EXPOSE 8000
 
-# Run the application
-CMD ["python", "test.py"]
+# Set environment for production
+ENV PYTHONUNBUFFERED=1
+
+# Run the API server
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
