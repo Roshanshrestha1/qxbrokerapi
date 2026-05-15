@@ -16,14 +16,24 @@ A clean, production-ready REST API for fetching real-time and historical candle 
 
 ## Quick Start
 
-### 1. Clone and Setup
+### Option 1: Using the Run Script (Recommended)
 
 ```bash
-cd qx_candle_api
-cp .env.example .env
+cd /workspace
+./run.sh
 ```
 
-### 2. Configure Environment
+The script will:
+- Create `.env` file from template if missing
+- Set up virtual environment
+- Install all dependencies
+- Install Playwright browsers
+- Perform initial login to save session
+- Start the API server
+
+### Option 2: Manual Setup
+
+#### 1. Configure Environment
 
 Edit `.env` with your QxBroker credentials:
 
@@ -33,14 +43,15 @@ QX_PASSWORD=your_password
 QX_ACCOUNT=PRACTICE  # or REAL
 ```
 
-### 3. Install Dependencies
+#### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 playwright install chromium
+playwright install-deps chromium  # Linux only
 ```
 
-### 4. Run the API
+#### 3. Run the API
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
@@ -51,7 +62,7 @@ Or simply:
 python main.py
 ```
 
-### 5. Access Documentation
+#### 4. Access Documentation
 
 Open your browser to:
 - **API Docs**: http://localhost:8000/docs
