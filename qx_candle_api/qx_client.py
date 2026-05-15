@@ -313,3 +313,190 @@ async def fetch_payouts() -> Dict[str, Any]:
     """
     client = await ensure_connected()
     return await client.get_assets_and_payouts()
+
+
+# -------------------------------------------------------
+# TRADING FUNCTIONS - Place Trades & Check Status
+# -------------------------------------------------------
+
+
+async def switch_account(account_type: str) -> Dict[str, Any]:
+    """
+    Switch between DEMO/PRACTICE and REAL account.
+    
+    Args:
+        account_type: 'DEMO', 'PRACTICE', or 'REAL'
+        
+    Returns:
+        Dictionary with new account status and balance
+    """
+    global _client
+    
+    account_type = account_type.upper()
+    if account_type not in ["DEMO", "PRACTICE", "REAL"]:
+        raise ValueError("Account type must be 'DEMO', 'PRACTICE', or 'REAL'")
+    
+    is_demo = account_type in ["DEMO", "PRACTICE"]
+    
+    # Reinitialize client with new account type
+    async with _connection_lock:
+        ssid = await get_ssid()
+        logger.info(f"Switching to {'DEMO' if is_demo else 'REAL'} account...")
+        
+        from api_quotex import AsyncQuotexClient
+        _client = AsyncQuotexClient(ssid=ssid, is_demo=is_demo)
+        
+        # Reconnect WebSocket
+        connected = await _client.connect()
+        if not connected:
+            raise ConnectionError("Failed to reconnect after account switch")
+    
+    # Fetch new balance
+    balance = await _client.get_balance()
+    
+    return {
+        "account_type": "DEMO" if is_demo else "REAL",
+        "is_demo": is_demo,
+        "balance": balance,
+        "status": "switched successfully"
+    }
+
+
+async def place_trade(
+    asset: str,
+    direction: str,
+    amount: float,
+    duration: int = 60,
+    account_type: str = "DEMO"
+) -> Dict[str, Any]:
+    """
+    Place a CALL (UP) or PUT (DOWN) trade.
+    
+    Args:
+        asset: Asset symbol (e.g., 'EURUSD', 'BTCUSD_otc')
+        direction: 'CALL' (UP) or 'PUT' (DOWN)
+        amount: Trade amount in account currency
+        duration: Trade duration in seconds (default: 60)
+        account_type: 'DEMO' or 'REAL' (affects which account balance is used)
+        
+    Returns:
+        Dictionary with trade ID, status, and details
+        
+    Raises:
+        ValueError: If direction is invalid
+        Exception: If trade placement fails
+    """
+    direction = direction.upper()
+    if direction not in ["CALL", "PUT", "UP", "DOWN"]:
+        raise ValueError("Direction must be 'CALL' (UP) or 'PUT' (DOWN)")
+    
+    # Normalize direction
+    trade_direction = "call" if direction in ["CALL", "UP"] else "put"
+    
+    client = await ensure_connected()
+    
+    # Switch account if needed
+    if account_type:
+        is_demo = account_type.upper() in ["DEMO", "PRACTICE"]
+        current_is_demo = getattr(client, 'is_demo', True)
+        if is_demo != current_is_demo:
+            await switch_account(account_type)
+            client = await ensure_connected()
+    
+    logger.info(f"Placing {trade_direction} trade on {asset}: amount={amount}, duration={duration}s")
+    
+    try:
+        # Place the trade using the client's buy method
+        trade_result = await client.buy(
+            amount=amount,
+            asset=asset,
+            direction=trade_direction,
+            duration=duration
+        )
+        
+        if not trade_result:
+            raise Exception("Trade placement returned no result")
+        
+        trade_id = trade_result.get("id", trade_result.get("trade_id", "unknown"))
+        
+        return {
+            "success": True,
+            "trade_id": trade_id,
+            "asset": asset.upper(),
+            "direction": trade_direction.upper(),
+            "amount": amount,
+            "duration": duration,
+            "account_type": "DEMO" if client.is_demo else "REAL",
+            "timestamp": trade_result.get("timestamp", int(asyncio.get_event_loop().time())),
+            "status": "open",
+            "details": trade_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Trade placement failed: {e}")
+        raise Exception(f"Failed to place trade: {str(e)}")
+
+
+async def get_trade_status(trade_id: str) -> Dict[str, Any]:
+    """
+    Get the current status of a trade.
+    
+    Args:
+        trade_id: The trade ID returned from place_trade()
+        
+    Returns:
+        Dictionary with trade status, profit/loss, and details
+    """
+    client = await ensure_connected()
+    
+    try:
+        # Try to get trade status from client
+        # This assumes the client has a method to check trade status
+        if hasattr(client, 'get_trade_status'):
+            status = await client.get_trade_status(trade_id)
+        elif hasattr(client, 'check_trade'):
+            status = await client.check_trade(trade_id)
+        else:
+            # Fallback: return pending status if no method available
+            status = {
+                "trade_id": trade_id,
+                "status": "unknown",
+                "message": "Trade status check not implemented for this broker"
+            }
+        
+        return {
+            "trade_id": trade_id,
+            "status": status.get("status", "unknown"),
+            "profit": status.get("profit", 0),
+            "payout": status.get("payout", 0),
+            "closed_at": status.get("closed_at"),
+            "details": status
+        }
+        
+    except Exception as e:
+        logger.error(f"Trade status check failed for {trade_id}: {e}")
+        return {
+            "trade_id": trade_id,
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def get_account_status() -> Dict[str, Any]:
+    """
+    Get current account status including type, balance, and connection state.
+    
+    Returns:
+        Dictionary with comprehensive account information
+    """
+    client = await ensure_connected()
+    
+    balance_info = await client.get_balance()
+    
+    return {
+        "account_type": "DEMO" if getattr(client, 'is_demo', True) else "REAL",
+        "is_demo": getattr(client, 'is_demo', True),
+        "connected": True,
+        "balance": balance_info,
+        "ssid_active": _ssid is not None
+    }

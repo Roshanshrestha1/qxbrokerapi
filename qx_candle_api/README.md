@@ -1,6 +1,6 @@
-# QxBroker Candle Data API
+# QxBroker Candle Data & Trading API
 
-A clean, production-ready REST API for fetching real-time and historical candle data from QxBroker via WebSocket connection.
+A clean, production-ready REST API for fetching real-time and historical candle data from QxBroker via WebSocket connection. Includes full trading functionality for placing CALL/PUT trades on DEMO or REAL accounts.
 
 ## Features
 
@@ -8,7 +8,9 @@ A clean, production-ready REST API for fetching real-time and historical candle 
 - **Historical data** - Get up to 24 hours of historical OHLCV data
 - **Market sentiment** - Access real trader buy/sell percentages
 - **Asset information** - List all available assets and payout rates
-- **Account balance** - Check your account balance
+- **Account management** - Check balance, switch between DEMO/REAL accounts
+- **Live trading** - Place CALL (UP) and PUT (DOWN) trades
+- **Trade status** - Monitor open and closed trade positions
 - **Secure authentication** - Session management with secure file permissions
 - **Production ready** - Proper logging, error handling, and retry logic
 
@@ -64,11 +66,25 @@ Open your browser to:
 | `GET /` | API health check |
 | `GET /docs` | Swagger UI documentation |
 
-### Account
+### Account Management
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /balance` | Get account balance |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `GET /balance` | GET | Get account balance |
+| `GET /account/status` | GET | Full account status (type, balance, connection) |
+| `POST /account/switch` | POST | Switch between DEMO and REAL accounts |
+
+#### Account Status Example
+```bash
+curl http://localhost:8000/account/status
+# Response: {"account_type": "DEMO", "is_demo": true, "connected": true, "balance": {...}}
+```
+
+#### Switch Account Example
+```bash
+curl -X POST "http://localhost:8000/account/switch?account_type=REAL"
+# Response: {"account_type": "REAL", "is_demo": false, "balance": {...}, "status": "switched successfully"}
+```
 
 ### Assets
 
@@ -92,6 +108,51 @@ Open your browser to:
 |----------|-------------|
 | `GET /price/{asset}` | Latest tick price |
 | `GET /sentiment/{asset}` | Market sentiment (% buy/sell) |
+
+### Trading Operations
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `POST /trade/place` | POST | Place CALL/PUT trade |
+| `GET /trade/status/{id}` | GET | Check trade status by ID |
+
+#### Place Trade Example
+```bash
+# Place a $10 CALL (UP) trade on EURUSD for 60 seconds on DEMO account
+curl -X POST "http://localhost:8000/trade/place?asset=EURUSD&direction=CALL&amount=10&duration=60&account_type=DEMO"
+
+# Place a $25 PUT (DOWN) trade on BTCUSD for 5 minutes on REAL account
+curl -X POST "http://localhost:8000/trade/place?asset=BTCUSD&direction=PUT&amount=25&duration=300&account_type=REAL"
+```
+
+**Trade Parameters:**
+- `asset`: Asset symbol (e.g., 'EURUSD', 'BTCUSD_otc')
+- `direction`: 'CALL' (UP) or 'PUT' (DOWN)
+- `amount`: Trade amount in account currency
+- `duration`: Trade duration in seconds (default: 60)
+- `account_type`: 'DEMO' or 'REAL' (default: DEMO)
+
+**Response:**
+```json
+{
+  "success": true,
+  "trade_id": "12345678",
+  "asset": "EURUSD",
+  "direction": "CALL",
+  "amount": 10.0,
+  "duration": 60,
+  "account_type": "DEMO",
+  "timestamp": 1234567890,
+  "status": "open",
+  "details": {...}
+}
+```
+
+#### Check Trade Status Example
+```bash
+curl http://localhost:8000/trade/status/12345678
+# Response: {"trade_id": "12345678", "status": "closed", "profit": 8.50, "payout": 18.50, ...}
+```
 
 ## Usage Examples
 
@@ -129,6 +190,25 @@ curl "http://localhost:8000/sentiment/EURUSD"
 # Response: {"asset": "EURUSD", "sentiment": {"buy": 62, "sell": 38}}
 ```
 
+### Complete Trading Flow
+
+```bash
+# 1. Check account status
+curl http://localhost:8000/account/status
+
+# 2. Switch to REAL account (if needed)
+curl -X POST "http://localhost:8000/account/switch?account_type=REAL"
+
+# 3. Check current sentiment
+curl http://localhost:8000/sentiment/EURUSD
+
+# 4. Place a CALL trade based on bullish sentiment
+curl -X POST "http://localhost:8000/trade/place?asset=EURUSD&direction=CALL&amount=10&duration=60"
+
+# 5. Monitor trade status
+curl http://localhost:8000/trade/status/12345678
+```
+
 ## Docker Support
 
 Build and run with Docker:
@@ -153,12 +233,25 @@ docker run -p 8000:8000 --env-file .env qx-candle-api
 - `3600` - 1 hour
 - `86400` - 1 day
 
+### Trade Directions
+- `CALL` or `UP` - Bet that price will go up
+- `PUT` or `DOWN` - Bet that price will go down
+
+### Account Types
+- `DEMO` or `PRACTICE` - Demo trading account
+- `REAL` - Real money trading account
+
 ## Security Notes
 
 - Session files are created with restricted permissions (owner read/write only)
 - Credentials are loaded from environment variables only
 - CORS is restricted to localhost by default
 - Never commit your `.env` file to version control
+- Use DEMO accounts for testing before trading with real money
+
+## Disclaimer
+
+Trading binary options involves significant risk and may not be suitable for all investors. This API is provided for educational and informational purposes only. Always trade responsibly and never invest more than you can afford to lose.
 
 ## License
 

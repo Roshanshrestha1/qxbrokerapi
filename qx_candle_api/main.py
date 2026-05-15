@@ -2,7 +2,8 @@
 QxBroker Candle Data API Server
 ================================
 Clean, production-ready API for fetching real-time and historical candle data
-from QxBroker via WebSocket connection.
+from QxBroker via WebSocket connection. Includes trading functionality for
+placing CALL/PUT trades on DEMO or REAL accounts.
 
 Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000
@@ -16,6 +17,8 @@ Endpoints:
     GET /                       - API health check
     GET /docs                   - Swagger UI documentation
     GET /balance                - Account balance
+    GET /account/status         - Full account status (type, balance, connection)
+    POST /account/switch        - Switch between DEMO and REAL accounts
     GET /assets                 - Available trading assets
     GET /payouts                - Asset payout percentages
     GET /candles/{asset}        - Historical OHLCV candles
@@ -24,6 +27,8 @@ Endpoints:
     GET /candles/{asset}/live   - Current forming candle
     GET /price/{asset}          - Latest tick price
     GET /sentiment/{asset}      - Market sentiment (buy/sell %)
+    POST /trade/place           - Place CALL/PUT trade
+    GET /trade/status/{id}      - Check trade status
 """
 
 import logging
@@ -41,6 +46,10 @@ from qx_client import (
     fetch_balance,
     fetch_all_assets,
     fetch_payouts,
+    place_trade,
+    get_trade_status,
+    switch_account,
+    get_account_status,
 )
 
 # Configure logging
@@ -305,6 +314,92 @@ async def get_sentiment(asset: str):
         return {"asset": asset.upper(), "sentiment": sentiment}
     except Exception as e:
         logger.error(f"Sentiment fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/account/status", tags=["Account"])
+async def account_status():
+    """
+    Get current account status including type (DEMO/REAL), balance, and connection state.
+    
+    Returns comprehensive account information.
+    """
+    try:
+        return await get_account_status()
+    except Exception as e:
+        logger.error(f"Account status fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/account/switch", tags=["Account"])
+async def switch_trading_account(account_type: str = Query(..., description="DEMO, PRACTICE, or REAL")):
+    """
+    Switch between DEMO/PRACTICE and REAL trading accounts.
+    
+    **Parameters:**
+    - account_type: 'DEMO', 'PRACTICE', or 'REAL'
+    
+    **Example:** `/account/switch?account_type=REAL`
+    """
+    try:
+        return await switch_account(account_type)
+    except Exception as e:
+        logger.error(f"Account switch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/trade/place", tags=["Trading"])
+async def trade_place(
+    asset: str = Query(..., description="Asset symbol (e.g., EURUSD, BTCUSD_otc)"),
+    direction: str = Query(..., description="CALL (UP) or PUT (DOWN)"),
+    amount: float = Query(..., description="Trade amount in account currency"),
+    duration: int = Query(default=60, description="Trade duration in seconds"),
+    account_type: str = Query(default="DEMO", description="DEMO or REAL account")
+):
+    """
+    Place a CALL (UP) or PUT (DOWN) trade.
+    
+    **Parameters:**
+    - asset: Asset symbol (e.g., 'EURUSD', 'BTCUSD_otc')
+    - direction: 'CALL' (UP) or 'PUT' (DOWN)
+    - amount: Trade amount
+    - duration: Trade duration in seconds (default: 60)
+    - account_type: 'DEMO' or 'REAL' (default: DEMO)
+    
+    **Example:** `/trade/place?asset=EURUSD&direction=CALL&amount=10&duration=60&account_type=DEMO`
+    
+    **Response:** Trade ID, status, and details
+    """
+    try:
+        result = await place_trade(
+            asset=asset.upper(),
+            direction=direction.upper(),
+            amount=amount,
+            duration=duration,
+            account_type=account_type
+        )
+        return result
+    except ValueError as e:
+        logger.error(f"Invalid trade parameters: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Trade placement failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/trade/status/{trade_id}", tags=["Trading"])
+async def trade_status(trade_id: str):
+    """
+    Get the current status of a trade by its ID.
+    
+    Returns trade status, profit/loss, and closing information if available.
+    
+    **Example:** `/trade/status/12345678`
+    """
+    try:
+        return await get_trade_status(trade_id)
+    except Exception as e:
+        logger.error(f"Trade status check failed for {trade_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
